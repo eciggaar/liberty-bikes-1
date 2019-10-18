@@ -32,8 +32,10 @@ import javax.naming.InitialContext;
 import javax.naming.NamingException;
 import javax.websocket.Session;
 
+import org.eclipse.microprofile.metrics.Timer.Context;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.libertybikes.game.core.Player.STATUS;
+import org.libertybikes.game.metric.GameMetrics;
 import org.libertybikes.restclient.PlayerService;
 
 import io.jsonwebtoken.Claims;
@@ -62,12 +64,14 @@ public class GameRound implements Runnable {
     // Properties exposed in JSON representation of object
     public final String id;
     public final String nextRoundId;
-    public volatile State gameState = State.OPEN;
+    private volatile State gameState = State.OPEN;
     private final GameBoard board = new GameBoard();
 
     private final AtomicBoolean gameRunning = new AtomicBoolean();
+    private final AtomicBoolean didRun = new AtomicBoolean();
     private final AtomicBoolean paused = new AtomicBoolean();
     private final AtomicBoolean heartbeatStarted = new AtomicBoolean();
+    private final AtomicBoolean gameClosed = new AtomicBoolean();
     private final Map<Session, Client> clients = new HashMap<>();
     private final Deque<Player> playerRanks = new ArrayDeque<>();
     private final Set<LifecycleCallback> lifecycleCallbacks = new HashSet<>();
@@ -86,6 +90,8 @@ public class GameRound implements Runnable {
     String keyStorePW;
 
     String keyStoreAlias;
+
+    private Context timerContext;
 
     // Get a string of 4 random uppercase letters (A-Z)
     private static String getRandomId() {
@@ -120,6 +126,10 @@ public class GameRound implements Runnable {
             log("Unable to perform JNDI lookup to determine time between rounds, using default value");
         }
         MAX_TIME_BETWEEN_ROUNDS = (maxTimeBetweenRounds < 5 || maxTimeBetweenRounds > 60) ? MAX_TIME_BETWEEN_ROUNDS_DEFAULT : maxTimeBetweenRounds;
+
+        // Increment round counter metrics
+        GameMetrics.counterInc(GameMetrics.totalRoundsCounter);
+        GameMetrics.counterInc(GameMetrics.currentRoundsCounter);
     }
 
     public GameBoard getBoard() {
@@ -136,9 +146,12 @@ public class GameRound implements Runnable {
             sendToClient(s, new OutboundMessage.AwaitPlayersCountdown(lobbyCountdown.roundStartCountdown));
     }
 
-    public void updatePlayerDirection(Session playerSession, InboundMessage msg) {
+    public boolean updatePlayerDirection(Session playerSession, InboundMessage msg) {
         Client c = clients.get(playerSession);
+        if (c == null)
+            return false;
         c.player.ifPresent((p) -> p.setDirection(msg.direction));
+        return true;
     }
 
     public boolean addPlayer(Session s, String playerId, String playerName, Boolean hasGameBoard) {
@@ -154,15 +167,28 @@ public class GameRound implements Runnable {
             return false;
         }
 
-        for (Client c : clients.values())
+        Client replaceClient = null;
+        for (Client c : clients.values()) {
             if (c.player.isPresent() && playerId.equals(c.player.get().id)) {
-                log("Cannot add player " + playerId + " to game because a player with that ID is already in the game.");
-                return false;
+                // If we find a player trying to join a game with the same ID as a player who is already
+                // in the game, assume it was from an AI Bot player who's developer made a hot code update
+                // TODO: once private IDs are implemented, could filter this on playerId.startsWith("BOT:")
+                replaceClient = c;
+                break;
             }
+        }
+        if (replaceClient != null) {
+            log("Replacing client with id: " + playerId);
+            removeClient(replaceClient.session);
+        }
 
-        if (getPlayers().size() + 1 >= Player.MAX_PLAYERS) {
+        int numPlayers = getPlayers().size() + 1;
+        if (numPlayers == Player.MAX_PLAYERS) {
             gameState = State.FULL;
             lobbyCountdown.gameFull();
+        } else if (numPlayers > Player.MAX_PLAYERS) {
+            log("Cannot add player " + playerId + " to game because the current round is full.");
+            return false;
         }
 
         Player p = board.addPlayer(playerId, playerName);
@@ -172,6 +198,14 @@ public class GameRound implements Runnable {
             isPhone = c.isPhone = hasGameBoard ? false : true;
             clients.put(s, c);
             log("Player " + playerId + " has joined.");
+
+            // Increment player counter metrics
+            GameMetrics.counterInc(GameMetrics.currentPlayersCounter);
+            GameMetrics.counterInc(GameMetrics.totalPlayersCounter);
+            if (isPhone) {
+                GameMetrics.counterInc(GameMetrics.totalMobilePlayersCounter);
+            }
+
         } else {
             log("Player " + playerId + " already exists.");
         }
@@ -228,7 +262,7 @@ public class GameRound implements Runnable {
         return c != null && c.player.isPresent();
     }
 
-    private void removePlayer(Player p) {
+    private void removePlayer(Player p, boolean isMobile) {
         p.disconnect();
         log(p.name + " disconnected.");
 
@@ -239,18 +273,35 @@ public class GameRound implements Runnable {
 
         if (isOpen()) {
             board.removePlayer(p);
+
+            // Decrement player counters because they didn't play
+            GameMetrics.counterDec(GameMetrics.totalPlayersCounter);
+            if (isMobile) {
+                GameMetrics.counterDec(GameMetrics.totalMobilePlayersCounter);
+            }
+
         } else if (gameState == State.RUNNING) {
             checkForWinner();
         }
 
         if (gameState != State.FINISHED)
             broadcastPlayerList();
+
+        // Decrement current players counter
+        GameMetrics.counterDec(GameMetrics.currentPlayersCounter);
     }
 
+    /**
+     * Removes a client from the game round
+     *
+     * @param client The client to remove
+     * @return The number of remaining clients in the game round
+     */
     public int removeClient(Session client) {
         Client c = clients.remove(client);
-        if (c != null && c.player.isPresent())
-            removePlayer(c.player.get());
+        if (c != null && c.player.isPresent()) {
+            removePlayer(c.player.get(), c.isPhone);
+        }
         return clients.size();
     }
 
@@ -262,7 +313,9 @@ public class GameRound implements Runnable {
     @Override
     public void run() {
         gameRunning.set(true);
+        didRun.set(true);
         log(">>> Starting round");
+
         ticksFromGameEnd = 0;
         int numGames = runningGames.incrementAndGet();
         if (numGames > 3)
@@ -467,6 +520,10 @@ public class GameRound implements Runnable {
         return gameState == State.OPEN;
     }
 
+    public State getGameState() {
+        return gameState;
+    }
+
     public void startGame() {
         if (isStarted())
             return;
@@ -482,9 +539,20 @@ public class GameRound implements Runnable {
         executor().submit(new Starter());
     }
 
-    private void endGame() {
-        runningGames.decrementAndGet();
+    public void endGame() {
+        if (gameClosed.getAndSet(true))
+            return;
+
+        gameState = State.FINISHED;
+        if (didRun.get())
+            runningGames.decrementAndGet();
         log("<<< Finished round");
+
+        // Decrement current rounds counter and close round timer
+        GameMetrics.counterDec(GameMetrics.currentRoundsCounter);
+        if (timerContext != null)
+            timerContext.close();
+
         broadcastPlayerList();
 
         ManagedScheduledExecutorService exec = executor();
@@ -530,8 +598,8 @@ public class GameRound implements Runnable {
         @Override
         public void run() {
 
-            for (int i = 0; i < (STARTING_COUNTDOWN * 4); i++) {
-                delay(250);
+            for (int i = 0; i < (STARTING_COUNTDOWN * 2); i++) {
+                delay(500);
                 broadcastPlayerList();
             }
 
@@ -544,6 +612,9 @@ public class GameRound implements Runnable {
                 executor().submit(GameRound.this);
             }
             gameState = State.RUNNING;
+
+            // Start round timer metric
+            timerContext = GameMetrics.timerStart(GameMetrics.gameRoundTimerMetadata);
         }
     }
 
@@ -559,16 +630,17 @@ public class GameRound implements Runnable {
         @Override
         public void run() {
             while (isOpen() || gameState == State.FULL) {
-                for (int i = 0; i < 4; i++) {
-                    delay(250);
+                for (int i = 0; i < 2; i++) {
+                    delay(500);
                     broadcastPlayerList();
                 }
                 roundStartCountdown--;
                 if (roundStartCountdown < 1) {
                     if (clients.size() == 0) {
+                        // Ensure that game state is closed off so that no other players
+                        // can quick join while a round is marked for deletion
                         log("No clients remaining.  Cancelling LobbyCountdown.");
-                        // Ensure that game state is closed off so that no other players can quick join while a round is marked for deletion
-                        gameState = State.FINISHED;
+                        endGame();
                     } else {
                         startGame();
                     }
@@ -585,9 +657,10 @@ public class GameRound implements Runnable {
         public Date getNextRunTime(LastExecution lastExecutionInfo, Date taskScheduledTime) {
             // If there are any clients still connected to this game, keep sending heartbeats
             if (clients.size() == 0) {
+                // Ensure that game state is closed off so that no other players
+                // can quick join while a round is marked for deletion
                 log("No clients remaining.  Cancelling heartbeat.");
-                // Ensure that game state is closed off so that no other players can quick join while a round is marked for deletion
-                gameState = State.FINISHED;
+                endGame();
                 return null;
             }
             return Date.from(Instant.now().plusSeconds(HEARTBEAT_INTERVAL_SEC));

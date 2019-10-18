@@ -1,4 +1,6 @@
 # Liberty Bikes
+[![Build Status](https://travis-ci.org/OpenLiberty/liberty-bikes.svg?branch=master)](https://travis-ci.org/OpenLiberty/liberty-bikes)
+
 
 ![Image of Liberty Bikes game](https://user-images.githubusercontent.com/1577201/47185063-0d307c00-d2f2-11e8-87f5-997ecf22c3d4.png)
 
@@ -20,12 +22,19 @@ Builds all microservice applications and deploys them to locally running liberty
 ./gradlew start frontend:open
 ```
 
-For a local setting, use single-party mode:
+Any code changes that are made in an IDE with auto-build enabled will automatically publish content to the loose application, meaning no server restarts should be required between code changes.
+
+By default, the player-service stores player registration and stats in-memory. To use a real database, you can start a PostgreSQL docker container with this script:
+
 ```
-./gradlew start frontend:open -DsingleParty=true
+./startDB.sh
 ```
 
-Any code changes that are made in an eclipse environment with auto-build enabled will automatically publish content to the loose application, meaning no server restarts should be required between code changes.
+To start the monitoring services, you must have Docker installed. They can be started with:
+
+```
+./startMonitoring.sh
+```
 
 To stop all liberty servers, issue the command:
 
@@ -49,12 +58,6 @@ To stop and remove the containers, use:
 ./gradlew dockerStop
 ```
 
-To use single-party mode, set the variable before running `dockerStart`
-
-```
-export singleParty=true
-```
-
 # Technologies used
 
 - Java EE 8
@@ -64,12 +67,15 @@ export singleParty=true
   - JNDI (auth-service, game-service, player-service)
   - [JSON-B](#json-b) (game-service, player-service)
   - WebSocket 1.1 (game-service)
-- MicroProfile 1.3
+- MicroProfile 2.2 
   - Config (auth-service, game-service, player-service)
   - JWT (auth-service, game-service, player-service)
   - [Rest Client](#microprofile-rest-client) (game-service)
   - [OpenAPI](#microprofile-openapi) (auth-service, game-service, player-service)
-- Angular 6 (frontend)
+  - [Metrics](#monitoring) (auth-service, game-service, player-service, frontend)
+- Angular 7 (frontend)
+- Prometheus for metric collection
+- Grafana for metric visualization
 - Gradle build
   - [Liberty Gradle Plugin](#liberty-gradle-plugin)
 - [IBM Cloud Continuous Delivery Pipeline](#continuous-delivery)
@@ -93,7 +99,7 @@ public class GameBoard {
 }
 ```
 
-By default, JSON-B will expose any `public` members as wel as public `getXXX()`, this includes other objects such as the `Set<Player> players` field.  The resulting class gets serialized into something like this:
+By default, JSON-B will expose any `public` members as well as public `getXXX()`, this includes other objects such as the `Set<Player> players` field.  The resulting class gets serialized into something like this:
 
 ```json
 {
@@ -213,7 +219,7 @@ buildscript {
     mavenCentral()
   }
   dependencies {
-    classpath 'net.wasdev.wlp.gradle.plugins:liberty-gradle-plugin:2.3'
+    classpath 'net.wasdev.wlp.gradle.plugins:liberty-gradle-plugin:2.6.5'
   }
 }
 ```
@@ -222,7 +228,7 @@ To control the Liberty distribution, we simply specify a dependency:
 
 ```groovy
 dependencies {
-    libertyRuntime group: 'com.ibm.websphere.appserver.runtime', name: 'wlp-webProfile7', version: '+'
+    libertyRuntime group: 'io.openliberty', name: 'openliberty-runtime', version: '[19.0.0.5,)'
 }
 ```
 
@@ -231,25 +237,54 @@ Or, if we want to use a Beta image instead of an official GA'd image, we specify
 ```groovy
 liberty {
   install {
-    // use 1 liberty install for the whole repo
-    baseDir = rootProject.buildDir
     runtimeUrl = "https://public.dhe.ibm.com/ibmdl/export/pub/software/websphere/wasdev/downloads/wlp/beta/wlp-beta-2018.5.0.0.zip"
   }
 }
 ```
 
-And lastly, we added some convenience Gradle tasks to make our life a bit easier (shorter names for less typing, always run unit tests before starting the server, and always stop the server before trying to start it!).
+## Monitoring
 
-```groovy
-libertyStart.dependsOn 'libertyStop', 'test'
+If you run Liberty Bikes in a container environment using `./gradlew dockerStart`, a Prometheus and Grafana instance will be started and preconfigured for monitoring the 4 Liberty Bikes microservices.
 
-task start { dependsOn 'libertyStart' }
-task stop  { dependsOn 'libertyStop'  }
+If you are running locally, you can open a browser to http://localhost:3000 and login with the username/password of `admin/admin` (respectively). The dashboard looks something like this:
+
+![Image of Grafana dashboard](https://user-images.githubusercontent.com/5427967/59791807-807ef900-9298-11e9-96fc-6071c85cf865.png)
+
+The above shapshot shows basic data such as:
+- Service Health: Green/Red boxes for up/down respectively
+- System info: CPU load and memory usage
+- Current stats:
+  - Number of players in queue
+  - Number of players playing a game
+  - Total actions/sec of players
+- Overall stats:
+  - Total number of logins
+  - Total number of games played
+
+Any application-specific stats can be collected using MicroProfile Metrics. For example, to collect number of player logins, we added the following code to our `createPlayer` method:
+```java
+    @Inject
+    private MetricRegistry registry;
+
+     private static final Metadata numLoginsCounter = new Metadata("num_player_logins", // name
+                    "Number of Total Logins", // display name
+                    "How many times a user has logged in.", // description
+                    MetricType.COUNTER, // type
+                    MetricUnits.NONE); // units
+
+    @POST
+    @Produces(MediaType.TEXT_HTML)
+    public String createPlayer(@QueryParam("name") String name, @QueryParam("id") String id) {
+      // ...
+      registry.counter(numLoginsCounter).inc();
+      // ...
+    }
 ```
+
 
 ## Continuous Delivery
 
-Early on we set up a build pipeline on IBM Cloud that we pointed at this GitHub repository.  Every time a new commit is merged into the `master` branch, the pipeline kicks off a new build and redeploys all of the services.  The average time from pressing merge on a PR to having the changes live on libertbikes.mybluemix.net is around 20 minutes.
+Early on we set up a build pipeline on IBM Cloud that we pointed at this GitHub repository.  Every time a new commit is merged into the `master` branch, the pipeline kicks off a new build and redeploys all of the services.  The average time from pressing merge on a PR to having the changes live on libertybikes.mybluemix.net is around 20 minutes.
 
 The pipeline UI looks like this in our dashboard:
 
