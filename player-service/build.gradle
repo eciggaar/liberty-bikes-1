@@ -35,6 +35,3 @@ task addPostgresqlToBuild(type: Copy) {
 
 assemble.dependsOn 'addPostgresqlToBuild'
 installApps.dependsOn 'addPostgresqlToServer'
-
-// The installLiberty task doesn't work when run in parallel with other installLiberty tasks
-installLiberty.mustRunAfter ':frontend:installLiberty'
