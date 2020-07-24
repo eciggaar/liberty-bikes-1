@@ -20,6 +20,6 @@ liberty {
 
 // The installLiberty task doesn't work when run in parallel with other installLiberty tasks, skip this one when project property 'iks'
 // is set
-if (!project.hasProperty('iks')) {
+if("prod".equals(System.getProperty("env_mode"))) {
 	installLiberty.mustRunAfter ':frontend:installLiberty'
 }
