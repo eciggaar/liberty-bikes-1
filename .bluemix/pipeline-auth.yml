@@ -399,7 +399,7 @@ stages:
       echo "DEPLOYMENT SUCCEEDED"
       if [ ! -z "${APP_SERVICE}" ]; then
         echo ""
-        IP_ADDR=$(ibmcloud cs workers ${PIPELINE_KUBERNETES_CLUSTER_NAME} | grep normal | head -n 1 | awk '{ print $2 }')
+        IP_ADDR=$(ibmcloud cs workers --cluster ${PIPELINE_KUBERNETES_CLUSTER_NAME} | grep normal | head -n 1 | awk '{ print $2 }')
         PORT=$( kubectl get services --namespace ${CLUSTER_NAMESPACE} | grep ${APP_SERVICE} | sed 's/.*:\([0-9]*\).*/\1/g' )
         echo ""
         echo -e "VIEW THE APPLICATION AT: http://${IP_ADDR}:${PORT}"
