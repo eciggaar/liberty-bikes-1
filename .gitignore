@@ -9,7 +9,7 @@ build
 /*/.project
 **/.classpath
 **/.settings/
-!org.eclipse.jdt.core.prefs
-!org.eclipse.jdt.ui.prefs
+org.eclipse.jdt.core.prefs
+org.eclipse.jdt.ui.prefs
 /frontend/src/main/webapp/*
 !/frontend/src/main/webapp/WEB-INF
