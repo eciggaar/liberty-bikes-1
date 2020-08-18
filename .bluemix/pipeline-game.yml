@@ -4,7 +4,7 @@ stages:
 - name: Build
   inputs:
   - type: git
-    branch: master
+    branch: game
     service: ${GIT_REPO}    
   triggers:
   - type: commit
