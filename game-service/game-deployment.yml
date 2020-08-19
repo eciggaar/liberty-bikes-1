@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: game
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: game
+  template:
+    metadata:
+      labels:
+       app: game
+    spec:
+      containers:
+      - name: game
+        env:
+        - name: org_libertybikes_restclient_PlayerService_mp_rest_url
+          value: http://player:8081
+        image: libertybikes-game
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: game
+  labels:
+    app: game
+spec:
+  type: NodePort
+  ports:
+    - port: 8080
+      nodePort: 30080
+  selector:
+    app: game
