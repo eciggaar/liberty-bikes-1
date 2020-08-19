@@ -15,24 +15,7 @@ stages:
     build_type: gradle
     script: |
       #!/bin/bash
-      # Build the deployment file
-      ENVIRONMENT_FILE="frontend/prebuild/src/environments/environment.ts"
-      ENVIRONMENT=$(cat <<'EOF'
-      export const environment = {
-          production: true,
-          API_URL_AUTH: `http://${document.location.hostname}:30082`,
-          API_URL_PARTY: `http://${document.location.hostname}:30080/party`,
-          API_URL_GAME_ROUND: `http://${document.location.hostname}:30080/round`,
-          API_URL_GAME_WS: `ws://${document.location.hostname}:30080/round/ws`,
-          API_URL_PLAYERS: `http://${document.location.hostname}:30081/player`,
-          API_URL_RANKS: `http://${document.location.hostname}:30081/rank`
-        };
-      EOF
-      )
-      echo "$ENVIRONMENT" > $ENVIRONMENT_FILE
-      cat frontend/prebuild/src/environments/environment.ts
-      ./gradlew clean build 
-
+      ./gradlew clean build libertyPackage -c frontend-settings.gradle -Denv_mode=prod
 - name: Prepping Containers
   inputs:
   - type: job
@@ -55,7 +38,7 @@ stages:
       region_id: ${REGISTRY_REGION_ID}
       api_key: ${API_KEY}
     namespace: ${REGISTRY_NAMESPACE}
-    image_name: liberty-bikes-frontend
+    image_name: ${CF_APP_NAME}
     script: |
       #!/bin/bash
       echo "REGISTRY_URL=${REGISTRY_URL}"
@@ -126,7 +109,6 @@ stages:
         echo "Content of image registry"
         ibmcloud cr images
       fi  
-
   - name: Build liberty-bikes-frontend
     type: builder
     build_type: cr
@@ -134,7 +116,7 @@ stages:
       region_id: ${REGISTRY_REGION_ID}
       api_key: ${API_KEY}
     namespace: ${REGISTRY_NAMESPACE}
-    image_name: liberty-bikes-frontend
+    image_name: ${CF_APP_NAME}
     script: |
       #!/bin/bash
 
@@ -212,7 +194,6 @@ stages:
       echo "GIT_BRANCH=${GIT_BRANCH}" >> $ARCHIVE_DIR/build.properties
       echo "File 'build.properties' created for passing env variables to subsequent pipeline jobs:"
       cat $ARCHIVE_DIR/build.properties
-
 - name: Deploy to IBM Cloud
   inputs:
   - type: job
@@ -231,6 +212,92 @@ stages:
     value: ./frontend/frontend-deployment.yml
     type: text      
   jobs:
+  - name: Pre-deploy check
+    type: deployer
+    target:
+      region_id: ${PROD_REGION_ID}
+      api_key: ${API_KEY}
+      kubernetes_cluster: ${PROD_CLUSTER_NAME}
+    script: |
+      #!/bin/bash
+
+      # This script checks the IBM Cloud Kubernetes Service cluster is ready, has a namespace configured with access to the private
+      # image registry (using an IBM Cloud API Key). It also configures Helm Tiller service to later perform a deploy with Helm.
+
+      # Input env variables (can be received via a pipeline environment properties.file.
+      echo "IMAGE_NAME=${IMAGE_NAME}"
+      echo "IMAGE_TAG=${IMAGE_TAG}"
+      echo "REGISTRY_URL=${REGISTRY_URL}"
+      echo "REGISTRY_NAMESPACE=${REGISTRY_NAMESPACE}"
+
+      # View build properties
+      if [ -f build.properties ]; then 
+        echo "build.properties:"
+        cat build.properties
+      else 
+        echo "build.properties : not found"
+      fi 
+
+      # Input env variables from pipeline job
+      echo "PIPELINE_KUBERNETES_CLUSTER_NAME=${PIPELINE_KUBERNETES_CLUSTER_NAME}"
+      echo "CLUSTER_NAMESPACE=${CLUSTER_NAMESPACE}"
+
+      echo "=========================================================="
+      echo "CHECKING DEPLOYMENT.YML manifest"
+      #Update deployment.yml with image name
+      if [ -z "${DEPLOYMENT_FILE}" ]; then DEPLOYMENT_FILE=frontend-deployment.yml ; fi
+      if [ ! -f ${DEPLOYMENT_FILE} ]; then
+        echo -e "${red}Kubernetes deployment file '${DEPLOYMENT_FILE}' not found${no_color}"
+        exit 1
+      fi
+
+      #Check cluster availability
+      echo "=========================================================="
+      echo "CHECKING CLUSTER readiness and namespace existence"
+      IP_ADDR=$( ibmcloud cs workers --cluster ${PIPELINE_KUBERNETES_CLUSTER_NAME} | grep normal | awk '{ print $2 }' )
+      if [ -z "${IP_ADDR}" ]; then
+        echo -e "${PIPELINE_KUBERNETES_CLUSTER_NAME} not created or workers not ready"
+        exit 1
+      fi
+      echo "Configuring cluster namespace"
+      if kubectl get namespace ${CLUSTER_NAMESPACE}; then
+        echo -e "Namespace ${CLUSTER_NAMESPACE} found."
+      else
+        kubectl create namespace ${CLUSTER_NAMESPACE}
+        echo -e "Namespace ${CLUSTER_NAMESPACE} created."
+      fi
+
+      # Grant access to private image registry from namespace $CLUSTER_NAMESPACE
+      # reference https://console.bluemix.net/docs/containers/cs_cluster.html#bx_registry_other
+      echo "=========================================================="
+      echo -e "CONFIGURING ACCESS to private image registry from namespace ${CLUSTER_NAMESPACE}"
+      IMAGE_PULL_SECRET_NAME="ibmcloud-toolchain-${PIPELINE_TOOLCHAIN_ID}-${REGISTRY_URL}"
+
+      echo -e "Checking for presence of ${IMAGE_PULL_SECRET_NAME} imagePullSecret for this toolchain"
+      if ! kubectl get secret ${IMAGE_PULL_SECRET_NAME} --namespace ${CLUSTER_NAMESPACE}; then
+        echo -e "${IMAGE_PULL_SECRET_NAME} not found in ${CLUSTER_NAMESPACE}, creating it"
+        # for Container Registry, docker username is 'token' and email does not matter
+        kubectl --namespace ${CLUSTER_NAMESPACE} create secret docker-registry ${IMAGE_PULL_SECRET_NAME} --docker-server=${REGISTRY_URL} --docker-password=${PIPELINE_BLUEMIX_API_KEY} --docker-username=iamapikey --docker-email=a@b.com
+      else
+        echo -e "Namespace ${CLUSTER_NAMESPACE} already has an imagePullSecret for this toolchain."
+      fi
+      
+      SERVICE_ACCOUNT=$(kubectl get serviceaccount default  -o json --namespace ${CLUSTER_NAMESPACE} )
+      
+      if ! echo ${SERVICE_ACCOUNT} | jq -e '. | has("imagePullSecrets")' > /dev/null ; then
+        kubectl patch --namespace ${CLUSTER_NAMESPACE} serviceaccount/default -p '{"imagePullSecrets":[{"name":"'"${IMAGE_PULL_SECRET_NAME}"'"}]}'
+      else
+        if echo ${SERVICE_ACCOUNT} | jq -e '.imagePullSecrets[] | select(.name=="'"${IMAGE_PULL_SECRET_NAME}"'")' > /dev/null ; then 
+          echo -e "Pull secret already found in default serviceAccount"
+        else
+          echo "Inserting toolchain pull secret into default serviceAccount"
+          kubectl patch --namespace ${CLUSTER_NAMESPACE} serviceaccount/default --type='json' -p='[{"op":"add","path":"/imagePullSecrets/-","value":{"name": "'"${IMAGE_PULL_SECRET_NAME}"'"}}]'
+        fi
+      fi
+      
+      echo "default serviceAccount:"
+      kubectl get serviceaccount default --namespace ${CLUSTER_NAMESPACE} -o yaml
+      echo -e "Namespace ${CLUSTER_NAMESPACE} authorizing with private image registry using patched default serviceAccount"
   - name: Deploy to Kubernetes
     type: deployer
     target:
@@ -239,74 +306,15 @@ stages:
       kubernetes_cluster: ${PROD_CLUSTER_NAME}
     script: |
       #!/bin/bash
+      # uncomment to debug the script
       #set -x
-      # Use this script as a starting point to create your own deployment.yml
-      # Make sure the cluster is running and get the ip_address
-      ip_addr=$(ibmcloud cs workers --cluster $PIPELINE_KUBERNETES_CLUSTER_NAME | grep normal | awk '{ print $2 }')
-      if [ -z $ip_addr ]; then
-        echo "$PIPELINE_KUBERNETES_CLUSTER_NAME not created or workers not ready"
-        exit 1
-      fi
-      # Initialize script variables
-      NAME="frontend"
-      IMAGE="$PIPELINE_IMAGE_URL"
-      if [ -z IMAGE ]; then
-        echo "$IMAGE not set. If using $PIPELINE_IMAGE_URL this variable is only configured when a "Container Registry" build job is used as the stage input."
-        exit 1
-      fi
-      echo ""
-      echo "Deploy environment variables:"
-      echo "NAME=$NAME"
-      echo "IMAGE=$IMAGE"
-      echo ""
-      DEPLOYMENT_FILE="deployment.yml"
-      echo "Creating deployment file $DEPLOYMENT_FILE"
-      # Build the deployment file
-      DEPLOYMENT=$(cat <<EOF''
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: $NAME
-      spec:
-        replicas: 1
-        selector:
-          matchLabels:
-            app: $NAME
-        template:
-          metadata:
-            labels:
-             app: $NAME
-          spec:
-            containers:
-            - image: $IMAGE
-              name: $NAME
-              ports:
-              - containerPort: 12000
-              resources: {}
-            restartPolicy: Always
-      status: {}
-      ---
-      apiVersion: v1
-      kind: Service
-      metadata:
-        name: $NAME
-        labels:
-          app: $NAME
-      spec:
-        type: NodePort
-        ports:
-          - port: 12000
-            nodePort: 30012
-        selector:
-          app: $NAME
-      EOF
-      )
-      
-      # Substitute the variables
-      echo "$DEPLOYMENT" > $DEPLOYMENT_FILE
-      sed -i 's/$NAME/'"$NAME"'/g' $DEPLOYMENT_FILE
-      sed -i 's=$IMAGE='"$IMAGE"'=g' $DEPLOYMENT_FILE
-
+      # copy the script below into your app code repo (e.g. ./scripts/deploy_kubectl.sh) and 'source' it from your pipeline job
+      #    source ./scripts/deploy_kubectl.sh
+      # alternatively, you can source it from online script:
+      #    source <(curl -sSL "https://raw.githubusercontent.com/open-toolchain/commons/master/scripts/deploy_kubectl.sh")
+      # ------------------
+      # source: https://raw.githubusercontent.com/open-toolchain/commons/master/scripts/deploy_kubectl.sh
+      # Input env variables (can be received via a pipeline environment properties.file.
       echo "IMAGE_NAME=${IMAGE_NAME}"
       echo "IMAGE_TAG=${IMAGE_TAG}"
       echo "REGISTRY_URL=${REGISTRY_URL}"
@@ -315,6 +323,7 @@ stages:
 
       #View build properties
       # cat build.properties
+      
       # also run 'env' command to find all available env variables
       # or learn more about the available environment variables at:
       # https://console.bluemix.net/docs/services/ContinuousDelivery/pipeline_deploy_var.html#deliverypipeline_environment
@@ -399,4 +408,3 @@ stages:
         echo ""
         echo -e "VIEW THE APPLICATION AT: http://${IP_ADDR}:${PORT}"
       fi
-

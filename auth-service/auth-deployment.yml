@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth
+  template:
+    metadata:
+      labels:
+        app: auth
+    spec:
+      containers:
+      - image: libertybikes-auth
+        env:
+        - name: auth_url
+          value: https://auth:8482/auth-service
+        - name: frontend_url
+          value: http://frontend:12000/login
+        name: auth
+        ports:
+        - containerPort: 8082
+        - containerPort: 8482
+        resources: {}
+      restartPolicy: Always
+  status: {}  
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth
+  labels:
+    app: auth 
+spec:
+  type: NodePort
+  ports:
+  - port: 8082
+    nodePort: 30082
