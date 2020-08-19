@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+       app: frontend
+    spec:
+      containers:
+      - image: libertybikes-frontend
+        name: frontend
+        ports:
+        - containerPort: 12000
+        resources: {}
+      restartPolicy: Always
+status: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  labels:
+    app: frontend
+spec:
+  type: NodePort
+  ports:
+    - port: 12000
+      nodePort: 30012
+  selector:
+    app: frontend
