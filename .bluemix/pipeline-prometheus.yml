@@ -196,7 +196,7 @@ stages:
       # Use this script as a starting point to create your own deployment.yml
 
       # Make sure the cluster is running and get the ip_address
-      ip_addr=$(ibmcloud cs workers $PIPELINE_KUBERNETES_CLUSTER_NAME | grep normal | awk '{ print $2 }')
+      ip_addr=$(ibmcloud cs workers --cluster $PIPELINE_KUBERNETES_CLUSTER_NAME | grep normal | awk '{ print $2 }')
       if [ -z $ip_addr ]; then
         echo "$PIPELINE_KUBERNETES_CLUSTER_NAME not created or workers not ready"
         exit 1
