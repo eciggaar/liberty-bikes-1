@@ -189,7 +189,7 @@ stages:
   inputs:
   - type: job
     stage: Prepping Containers
-    job: Build libertybikes-auth
+    job: Build liberty-bikes-auth
   triggers:
   - type: stage
   properties:
