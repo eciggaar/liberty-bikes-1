@@ -13,7 +13,7 @@ spec:
        app: frontend
     spec:
       containers:
-      - image: libertybikes-frontend
+      - image: liberty-bikes-frontend
         name: frontend
         ports:
         - containerPort: 12000

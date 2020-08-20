@@ -17,7 +17,7 @@ spec:
         env:
         - name: org_libertybikes_restclient_PlayerService_mp_rest_url
           value: http://player:8081
-        image: libertybikes-game
+        image: liberty-bikes-game
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
