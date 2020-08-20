@@ -13,7 +13,7 @@ spec:
         app: auth
     spec:
       containers:
-      - image: libertybikes-auth
+      - image: liberty-bikes-auth
         env:
         - name: auth_url
           value: https://auth:8482/auth-service
