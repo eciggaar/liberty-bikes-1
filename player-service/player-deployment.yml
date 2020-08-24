@@ -13,8 +13,8 @@ spec:
        app: player
     spec:
       containers:
-      - name: player
-        image: liberty-bikes-player
+      - image: liberty-bikes-player
+        name: player
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8081
