@@ -19,7 +19,6 @@ spec:
         - containerPort: 12000
         resources: {}
       restartPolicy: Always
-status: {}
 ---
 apiVersion: v1
 kind: Service

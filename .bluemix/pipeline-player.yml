@@ -339,7 +339,7 @@ stages:
       echo -e "Updating ${DEPLOYMENT_FILE} with image name: ${REGISTRY_URL}/${REGISTRY_NAMESPACE}/${IMAGE_NAME}:${IMAGE_TAG}"
       if [ -z "${DEPLOYMENT_FILE}" ]; then DEPLOYMENT_FILE=deployment.yml ; fi
       if [ -f ${DEPLOYMENT_FILE} ]; then
-        sed -i "s~^\([[:blank:]]*\)- image:.*$~\1- image: ${REGISTRY_URL}/${REGISTRY_NAMESPACE}/${IMAGE_NAME}:${IMAGE_TAG}~" ${DEPLOYMENT_FILE}
+        sed -i "s~^\([[:blank:]]*\) image:.*$~\1 image: ${REGISTRY_URL}/${REGISTRY_NAMESPACE}/${IMAGE_NAME}:${IMAGE_TAG}~" ${DEPLOYMENT_FILE}
         cat ${DEPLOYMENT_FILE}
       else 
         echo -e "${red}Kubernetes deployment file '${DEPLOYMENT_FILE}' not found${no_color}"
