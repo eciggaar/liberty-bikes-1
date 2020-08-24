@@ -13,11 +13,11 @@ spec:
        app: game
     spec:
       containers:
-      - name: game
+      - image: liberty-bikes-game
         env:
         - name: org_libertybikes_restclient_PlayerService_mp_rest_url
           value: http://player:8081
-        image: liberty-bikes-game
+        name: game
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
