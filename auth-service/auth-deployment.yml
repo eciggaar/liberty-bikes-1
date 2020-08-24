@@ -24,8 +24,7 @@ spec:
         - containerPort: 8082
         - containerPort: 8482
         resources: {}
-      restartPolicy: Always
-  status: {}  
+      restartPolicy: Always 
 ---
 apiVersion: v1
 kind: Service
