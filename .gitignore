@@ -16,3 +16,4 @@ org.eclipse.jdt.ui.prefs
 *.prefs
 auth-service/.settings/org.eclipse.jdt.core.prefs
 game-service/.settings/org.eclipse.jdt.core.prefs
+player-service/.settings/org.eclipse.jdt.core.prefs
