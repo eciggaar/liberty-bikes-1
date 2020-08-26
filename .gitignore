@@ -14,3 +14,6 @@ org.eclipse.jdt.ui.prefs
 /frontend/src/main/webapp/*
 !/frontend/src/main/webapp/WEB-INF
 *.prefs
+auth-service/.settings/org.eclipse.jdt.core.prefs
+game-service/.settings/org.eclipse.jdt.core.prefs
+player-service/.settings/org.eclipse.jdt.core.prefs

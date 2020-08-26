@@ -37,3 +37,5 @@ spec:
   ports:
   - port: 8082
     nodePort: 30082
+  selector:
+    app: auth
