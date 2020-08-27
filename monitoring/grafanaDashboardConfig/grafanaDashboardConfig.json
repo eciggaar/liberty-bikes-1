@@ -535,8 +535,19 @@
         "colorScheme": "interpolateGnYlRd",
         "defaultColor": "#757575",
         "exponent": 0.5,
-        "mode": "spectrum",
-        "thresholds": []
+        "mode": "discrete",
+        "thresholds": [
+          {
+            "color": "#971D2B",
+            "value": "0",
+            "tooltip": "error"
+          },
+          {
+            "color": "#2B663C",
+            "value": "1",
+            "tooltip": "ok"
+          }
+        ]        
       },
       "data": {
         "decimals": null,
