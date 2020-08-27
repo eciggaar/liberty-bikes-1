@@ -232,6 +232,14 @@ stages:
           exit 1
         fi
 
+        echo "Configuring cluster namespace"
+        if kubectl get namespace ${CLUSTER_NAMESPACE}; then
+          echo -e "Namespace ${CLUSTER_NAMESPACE} found."
+        else
+          kubectl create namespace ${CLUSTER_NAMESPACE}
+          echo -e "Namespace ${CLUSTER_NAMESPACE} created."
+        fi        
+
         # Initialize script variables
         NAME="grafana"
         IMAGE="$PIPELINE_IMAGE_URL"
@@ -318,6 +326,7 @@ stages:
         # Show the IP address and the PORT of the running app
         echo "RUNNING APPLICATION:"
         echo "URL=http://$ip_addr"
+        port=$( kubectl get services --namespace ${CLUSTER_NAMESPACE} | grep ${NAME} | sed 's/.*:\([0-9]*\).*/\1/g' )
         echo "PORT=$port"
         echo ""
         echo "$NAME running at: http://$ip_addr:$port"
