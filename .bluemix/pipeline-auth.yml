@@ -234,7 +234,7 @@ stages:
       echo "CHECKING DEPLOYMENT.YML manifest"
       
       #Update deployment.yml with image name
-      if [ -z "${DEPLOYMENT_FILE}" ]; then DEPLOYMENT_FILE=frontend-deployment.yml ; fi
+      if [ -z "${DEPLOYMENT_FILE}" ]; then DEPLOYMENT_FILE=auth-deployment.yml ; fi
       if [ ! -f ${DEPLOYMENT_FILE} ]; then
         echo -e "${red}Kubernetes deployment file '${DEPLOYMENT_FILE}' not found${no_color}"
         exit 1
