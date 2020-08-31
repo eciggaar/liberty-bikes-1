@@ -13,8 +13,8 @@ spec:
         app: grafana
     spec:
       containers:
-      - name: grafana
-        image: liberty-bikes-grafana
+      - image: liberty-bikes-grafana
+        name: grafana
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 3000
