@@ -14,12 +14,10 @@ import org.eclipse.microprofile.metrics.Timer.Context;
 
 public class GameMetrics {
     // MpMetric Metadatas
-    public static final Metadata currentRoundsCounter = new MetadataBuilder()
-                    .withName("current_num_of_rounds")
-                    .withDisplayName("Current Number of Rounds")
-                    .withDescription("Number of rounds currently running")
-                    .withType(MetricType.CONCURRENT_GAUGE)
-                    .build();
+
+    /**
+     * DEMO STEP: Add metric for current number of game rounds
+     */
 
     public static final Metadata totalRoundsCounter = new MetadataBuilder()
                     .withName("total_num_of_rounds")
