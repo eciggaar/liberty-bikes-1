@@ -129,7 +129,9 @@ public class GameRound implements Runnable {
 
         // Increment round counter metrics
         GameMetrics.counterInc(GameMetrics.totalRoundsCounter);
-        GameMetrics.counterInc(GameMetrics.currentRoundsCounter);
+        /**
+         * DEMO STEP: Add code to increment current numbers of game rounds
+         */
     }
 
     public GameBoard getBoard() {
@@ -549,8 +551,12 @@ public class GameRound implements Runnable {
         log("<<< Finished round");
 
         // Decrement current rounds counter and close round timer
-        GameMetrics.counterDec(GameMetrics.currentRoundsCounter);
-        if (timerContext != null)
+
+        /**
+         * DEMO STEP: Add code to decrement current number of game rounds
+         */
+
+         if (timerContext != null)
             timerContext.close();
 
         broadcastPlayerList();
